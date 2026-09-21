@@ -8,6 +8,8 @@ import {
   type SystemResource,
   type AppSystemLog,
 } from "../../services/mikrotik";
+import { exportLocalBackup, importLocalBackup } from "../../services/storage";
+
 
 export default function RouterSettings() {
   const [config, setConfig] = useState<RouterConfig>(getRouterConfig);
@@ -16,11 +18,23 @@ export default function RouterSettings() {
   const [pinging, setPinging] = useState(false);
   const [pingResult, setPingResult] = useState<{ ok: boolean; msg: string; resource?: SystemResource } | null>(null);
   const [errorLogs, setErrorLogs] = useState<AppSystemLog[]>([]);
+  const [backupMsg, setBackupMsg] = useState<{ text: string; error: boolean } | null>(null);
+
+  const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const res = await importLocalBackup(file);
+    setBackupMsg({ text: res.message, error: !res.ok });
+    if (res.ok) {
+      setTimeout(() => window.location.reload(), 1500);
+    }
+  };
 
   useEffect(() => {
     const errs = getAppSystemLogs().filter((l) => l.level === "error");
     setErrorLogs(errs.slice(0, 10));
   }, [pingResult]);
+
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -196,6 +210,45 @@ export default function RouterSettings() {
               <p className="text-xs text-[#6B7280]">CPU Load</p>
               <p className="text-sm font-bold text-[#1F2937] mt-0.5">{pingResult.resource.cpuLoad}%</p>
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* Local PC Storage & Data Backup */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-[#1F2937] font-semibold text-sm">Local PC Storage & Backup (Zero Database)</h3>
+            <p className="text-xs text-[#6B7280] mt-0.5">
+              All plans, vouchers, payment logs, and router configurations are stored locally on this computer.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={exportLocalBackup}
+              className="px-3.5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5"
+            >
+              <span>💾 Export Full Backup</span>
+            </button>
+            <label className="px-3.5 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5">
+              <span>📂 Restore Backup</span>
+              <input
+                type="file"
+                accept=".json"
+                onChange={handleImportBackup}
+                className="hidden"
+              />
+            </label>
+          </div>
+        </div>
+
+        {backupMsg && (
+          <div
+            className={`mt-3 p-3 rounded-xl text-xs font-medium ${
+              backupMsg.error ? "bg-red-50 text-red-700 border border-red-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+            }`}
+          >
+            {backupMsg.text}
           </div>
         )}
       </div>

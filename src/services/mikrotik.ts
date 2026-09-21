@@ -167,7 +167,7 @@ function getAuthHeader(cfg: RouterConfig): string {
   return "Basic " + btoa(`${cfg.apiUser}:${cfg.apiPassword}`);
 }
 
-async function requestRouter<T>(
+export async function requestRouter<T>(
   path: string,
   method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" = "GET",
   body?: unknown,
@@ -594,3 +594,82 @@ export function formatBytes(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
 }
+
+export interface StaticDnsRecord {
+  id: string;
+  name: string;
+  address: string;
+  ttl?: string;
+  comment?: string;
+}
+
+export async function fetchStaticDnsRecords(): Promise<StaticDnsRecord[]> {
+  try {
+    const raw = await requestRouter<Array<Record<string, unknown>>>("/ip/dns/static");
+    if (!Array.isArray(raw)) return [];
+    return raw.map((r) => ({
+      id: String(r[".id"] || r.id || ""),
+      name: String(r.name || ""),
+      address: String(r.address || ""),
+      ttl: String(r.ttl || "5m"),
+      comment: String(r.comment || ""),
+    }));
+  } catch (err) {
+    console.warn("Failed to fetch static DNS records:", err);
+    return [];
+  }
+}
+
+export async function ensureStaticDnsRecord(
+  domain: string,
+  hostIp: string
+): Promise<{ ok: boolean; message: string; recordId?: string }> {
+  try {
+    const existing = await fetchStaticDnsRecords();
+    const cleanDomain = domain.trim().toLowerCase();
+    const matched = existing.find((r) => r.name.toLowerCase() === cleanDomain);
+
+    if (matched) {
+      if (matched.address === hostIp) {
+        return {
+          ok: true,
+          message: `Static DNS record for ${cleanDomain} is already pointing to ${hostIp}`,
+          recordId: matched.id,
+        };
+      }
+      // Update existing record
+      await requestRouter(`/ip/dns/static/${encodeURIComponent(matched.id)}`, "PATCH", {
+        address: hostIp,
+        comment: "Managed by Wazobia FastNet Server",
+      });
+      logAppEvent("system", "info", `Updated static DNS: ${cleanDomain} -> ${hostIp}`);
+      return {
+        ok: true,
+        message: `Updated static DNS record: ${cleanDomain} now points to ${hostIp}`,
+        recordId: matched.id,
+      };
+    }
+
+    // Create new record
+    const result = await requestRouter<Record<string, unknown>>("/ip/dns/static", "PUT", {
+      name: cleanDomain,
+      address: hostIp,
+      ttl: "5m",
+      comment: "Managed by Wazobia FastNet Server",
+    });
+    logAppEvent("system", "info", `Created static DNS: ${cleanDomain} -> ${hostIp}`);
+    return {
+      ok: true,
+      message: `Created static DNS entry: ${cleanDomain} -> ${hostIp}`,
+      recordId: String(result?.[".id"] || result?.id || ""),
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logAppEvent("error", "warn", `Could not update MikroTik static DNS: ${msg}`);
+    return {
+      ok: false,
+      message: `Failed to set static DNS on MikroTik: ${msg}`,
+    };
+  }
+}
+

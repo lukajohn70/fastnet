@@ -9,8 +9,20 @@ import {
   type HotspotUser,
   type PaymentRecord,
 } from "../../services/mikrotik";
+import {
+  getServerSnapshot,
+  startServer,
+  stopServer,
+  subscribeServerState,
+  formatUptime,
+} from "../../services/serverController";
 
-export default function Dashboard() {
+interface DashboardProps {
+  onOpenServerControl?: () => void;
+  onOpenLicense?: () => void;
+}
+
+export default function Dashboard({ onOpenServerControl, onOpenLicense }: DashboardProps) {
   const [loading, setLoading] = useState(true);
   const [resource, setResource] = useState<SystemResource | null>(null);
   const [activeSessions, setActiveSessions] = useState<HotspotActiveUser[]>([]);
@@ -36,11 +48,31 @@ export default function Dashboard() {
     }
   };
 
+  const [serverSnapshot, setServerSnapshot] = useState(() => getServerSnapshot());
+  const [serverActionLoading, setServerActionLoading] = useState(false);
+
   useEffect(() => {
     loadData();
     const interval = setInterval(loadData, 15000);
-    return () => clearInterval(interval);
+    const unsubServer = subscribeServerState(() => {
+      setServerSnapshot(getServerSnapshot());
+    });
+    return () => {
+      clearInterval(interval);
+      unsubServer();
+    };
   }, []);
+
+  const handleToggleServer = async () => {
+    setServerActionLoading(true);
+    if (serverSnapshot.status === "running") {
+      await stopServer();
+    } else {
+      await startServer();
+    }
+    setServerActionLoading(false);
+  };
+
 
   const totalPaid = payments
     .filter((p) => p.status === "paid")
@@ -116,6 +148,97 @@ export default function Dashboard() {
           </svg>
           Refresh Live
         </button>
+      </div>
+
+      {/* FastNet Local Server & Persistent URL Banner */}
+      <div className="bg-gradient-to-r from-[#0F172A] via-[#1E3A8A] to-[#1D4ED8] rounded-2xl p-4 sm:p-5 text-white shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-xl bg-white/15 backdrop-blur-md flex items-center justify-center flex-shrink-0">
+            <svg viewBox="0 0 24 24" className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+              <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+              <line x1="6" y1="6" x2="6.01" y2="6" />
+              <line x1="6" y1="18" x2="6.01" y2="18" />
+            </svg>
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold uppercase tracking-wider text-blue-200">FastNet LAN Server</span>
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 ${
+                  serverSnapshot.status === "running"
+                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                    : serverSnapshot.status === "starting" || serverActionLoading
+                    ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                    : "bg-white/10 text-gray-300 border border-white/20"
+                }`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    serverSnapshot.status === "running"
+                      ? "bg-emerald-400 animate-pulse"
+                      : serverSnapshot.status === "starting" || serverActionLoading
+                      ? "bg-amber-400 animate-spin"
+                      : "bg-gray-400"
+                  }`}
+                />
+                {serverSnapshot.status === "running" ? "Online" : serverSnapshot.status === "starting" ? "Starting" : "Offline"}
+              </span>
+              {serverSnapshot.status === "running" && (
+                <span className="text-[10px] text-blue-200 bg-white/10 px-2 py-0.5 rounded-full">
+                  Up {formatUptime(serverSnapshot.metrics.uptimeSeconds)}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 mt-1">
+              <p className="font-mono font-bold text-sm sm:text-base text-white tracking-tight">
+                {serverSnapshot.urls.primaryUrl}
+              </p>
+              <span className="text-[11px] text-blue-200 hidden sm:inline">• Static DNS Active</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 w-full sm:w-auto self-stretch sm:self-auto justify-end">
+          <button
+            onClick={handleToggleServer}
+            disabled={serverActionLoading || serverSnapshot.status === "starting"}
+            className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-xs font-bold transition-all shadow flex items-center justify-center gap-1.5 ${
+              serverSnapshot.status === "running"
+                ? "bg-red-600/90 hover:bg-red-600 text-white"
+                : "bg-emerald-500 hover:bg-emerald-600 text-white"
+            }`}
+          >
+            {serverActionLoading || serverSnapshot.status === "starting" ? (
+              <>
+                <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Pre-Flight...
+              </>
+            ) : serverSnapshot.status === "running" ? (
+              <>Stop Server</>
+            ) : (
+              <>
+                <svg viewBox="0 0 20 20" className="w-3.5 h-3.5 fill-current">
+                  <path d="M4 4l12 6-12 6V4z" />
+                </svg>
+                Start Server
+              </>
+            )}
+          </button>
+
+          {onOpenServerControl && (
+            <button
+              onClick={onOpenServerControl}
+              className="px-3.5 py-2 bg-white/15 hover:bg-white/25 text-white rounded-xl text-xs font-semibold transition-all border border-white/10 flex items-center gap-1.5"
+            >
+              <span>Control Hub</span>
+              <svg viewBox="0 0 20 20" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M7 7l5 5-5 5" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Stat cards */}
