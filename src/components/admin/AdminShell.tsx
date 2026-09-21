@@ -5,6 +5,7 @@ import PaymentLogs from "./PaymentLogs";
 import RouterSettings from "./RouterSettings";
 import SystemLogs from "./SystemLogs";
 import PlansManager from "./PlansManager";
+import BrandingManager from "./BrandingManager";
 import ServerControlModal from "./ServerControlModal";
 import LicenseModal from "./LicenseModal";
 import { type Plan } from "../../types";
@@ -17,8 +18,13 @@ import {
   getRemainingTimeText,
   type LicenseData,
 } from "../../services/licensing";
+import {
+  getBrandingConfig,
+  subscribeBranding,
+  type BrandingConfig,
+} from "../../services/branding";
 
-type Section = "dashboard" | "users" | "payments" | "plans" | "router" | "logs";
+type Section = "dashboard" | "users" | "payments" | "plans" | "router" | "branding" | "logs";
 
 interface Props {
   plans: Plan[];
@@ -54,6 +60,11 @@ const NAV: { id: Section; label: string; icon: React.ReactNode }[] = [
     icon: <svg viewBox="0 0 20 20" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="10" cy="10" r="8" /><path d="M10 6v4l3 2" /></svg>,
   },
   {
+    id: "branding",
+    label: "Branding & Customization",
+    icon: <svg viewBox="0 0 20 20" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>,
+  },
+  {
     id: "logs",
     label: "System Logs",
     icon: <svg viewBox="0 0 20 20" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h12M4 8h12M4 12h8M4 16h5" /></svg>,
@@ -68,12 +79,19 @@ export default function AdminShell({ plans, setPlans, onLogout, onExitAdmin }: P
 
   const [serverSnapshot, setServerSnapshot] = useState(() => getServerSnapshot());
   const [licenseData, setLicenseData] = useState<LicenseData>(() => getLicenseData());
+  const [branding, setBranding] = useState<BrandingConfig>(() => getBrandingConfig());
 
   useEffect(() => {
-    const unsub = subscribeServerState(() => {
+    const unsubServer = subscribeServerState(() => {
       setServerSnapshot(getServerSnapshot());
     });
-    return unsub;
+    const unsubBranding = subscribeBranding((cfg) => {
+      setBranding(cfg);
+    });
+    return () => {
+      unsubServer();
+      unsubBranding();
+    };
   }, []);
 
   const remainingTrialText = getRemainingTimeText(licenseData);
@@ -88,14 +106,18 @@ export default function AdminShell({ plans, setPlans, onLogout, onExitAdmin }: P
       >
         {/* Brand */}
         <div className="px-5 py-5 flex items-center gap-3 border-b border-white/10">
-          <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
-            <svg viewBox="0 0 20 20" className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 10.4A8 8 0 0117 10.4" /><path d="M5.5 13.2A5 5 0 0114.5 13.2" /><circle cx="10" cy="16" r="1.2" fill="white" />
-            </svg>
+          <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0 overflow-hidden">
+            {branding.logoUrl ? (
+              <img src={branding.logoUrl} alt="Logo" className="w-full h-full object-contain" />
+            ) : (
+              <svg viewBox="0 0 20 20" className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 10.4A8 8 0 0117 10.4" /><path d="M5.5 13.2A5 5 0 0114.5 13.2" /><circle cx="10" cy="16" r="1.2" fill="white" />
+              </svg>
+            )}
           </div>
-          <div>
-            <p className="text-white font-bold text-sm leading-tight">Wazobia FastNet</p>
-            <p className="text-blue-300 text-xs">Desktop Host & Admin</p>
+          <div className="min-w-0">
+            <p className="text-white font-bold text-sm leading-tight truncate">{branding.businessName}</p>
+            <p className="text-blue-300 text-xs truncate">{branding.tagline || "Desktop Host & Admin"}</p>
           </div>
         </div>
 
@@ -253,8 +275,12 @@ export default function AdminShell({ plans, setPlans, onLogout, onExitAdmin }: P
               <span>← Customer View</span>
             </button>
 
-            <div className="w-8 h-8 rounded-full bg-[#2563EB] flex items-center justify-center text-white text-xs font-bold">
-              AD
+            <div className="w-8 h-8 rounded-full bg-[#2563EB] flex items-center justify-center text-white text-xs font-bold overflow-hidden">
+              {branding.logoUrl ? (
+                <img src={branding.logoUrl} alt="Logo" className="w-full h-full object-contain bg-white" />
+              ) : (
+                "AD"
+              )}
             </div>
           </div>
         </div>
@@ -271,6 +297,7 @@ export default function AdminShell({ plans, setPlans, onLogout, onExitAdmin }: P
           {section === "payments" && <PaymentLogs />}
           {section === "plans" && <PlansManager plans={plans} setPlans={setPlans} />}
           {section === "router" && <RouterSettings />}
+          {section === "branding" && <BrandingManager />}
           {section === "logs" && <SystemLogs />}
         </div>
       </div>

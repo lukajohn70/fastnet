@@ -11,6 +11,7 @@ export interface BackupData {
   version: string;
   exportedAt: string;
   config: Record<string, unknown>;
+  branding?: Record<string, unknown>;
   plans: unknown[];
   payments: unknown[];
   logs: unknown[];
@@ -29,6 +30,7 @@ export function exportLocalBackup(): void {
     version: "1.0.0",
     exportedAt: new Date().toISOString(),
     config: JSON.parse(localStorage.getItem("fastnet_router_config") || "{}"),
+    branding: JSON.parse(localStorage.getItem("fastnet_branding_config_v1") || "{}"),
     plans: JSON.parse(localStorage.getItem("fastnet_custom_plans") || "[]"),
     payments: JSON.parse(localStorage.getItem("fastnet_payment_records") || "[]"),
     logs: JSON.parse(localStorage.getItem("fastnet_system_logs") || "[]"),
@@ -59,6 +61,7 @@ export async function importLocalBackup(file: File): Promise<{ ok: boolean; mess
     }
 
     if (parsed.config) localStorage.setItem("fastnet_router_config", JSON.stringify(parsed.config));
+    if (parsed.branding) localStorage.setItem("fastnet_branding_config_v1", JSON.stringify(parsed.branding));
     if (parsed.plans) localStorage.setItem("fastnet_custom_plans", JSON.stringify(parsed.plans));
     if (parsed.payments) localStorage.setItem("fastnet_payment_records", JSON.stringify(parsed.payments));
     if (parsed.logs) localStorage.setItem("fastnet_system_logs", JSON.stringify(parsed.logs));
@@ -69,3 +72,4 @@ export async function importLocalBackup(file: File): Promise<{ ok: boolean; mess
     return { ok: false, message: `Failed to import backup: ${err instanceof Error ? err.message : String(err)}` };
   }
 }
+
