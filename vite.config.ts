@@ -23,6 +23,7 @@ export default defineConfig(({ mode }) => {
       figmaErrorOverlayReplay(),
       figmaReactRefreshBoundaryFallback(),
       figmaMakeKitPlugin({ storiesGlob: '/src/**/*.stories.{ts,tsx,js,jsx}' }),
+      mikrotikProxyPlugin(),
     ],
     resolve: {
       alias: {
@@ -67,6 +68,73 @@ type FigmaSiteConfiguration = {
   accessibility?: {
     addBypassLinks?: boolean
   }
+}
+
+/** Proxies /api/mikrotik requests to the configured MikroTik router, bypassing browser CORS & self-signed cert blocks. */
+function mikrotikProxyPlugin(): Plugin {
+  return {
+    name: 'mikrotik-proxy',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        if (!req.url?.startsWith('/api/mikrotik')) {
+          return next();
+        }
+        try {
+          const urlObj = new URL(req.url, 'http://localhost');
+          const target = urlObj.searchParams.get('target');
+          const pathSuffix = urlObj.searchParams.get('path') || '';
+          if (!target) {
+            res.statusCode = 400;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: 'Missing target query parameter' }));
+            return;
+          }
+          const fullTargetUrl = new URL(pathSuffix, target.endsWith('/') ? target : target + '/').href;
+          const targetUrlObj = new URL(fullTargetUrl);
+          const isHttps = targetUrlObj.protocol === 'https:';
+          const clientModule = isHttps ? await import('node:https') : await import('node:http');
+
+          const chunks: any[] = [];
+          for await (const chunk of req) {
+            chunks.push(chunk);
+          }
+          const bodyBuffer = Buffer.concat(chunks);
+
+          const headers: Record<string, any> = { ...req.headers };
+          delete headers.host;
+          headers.host = targetUrlObj.host;
+
+          const proxyReq = clientModule.request(
+            targetUrlObj,
+            {
+              method: req.method,
+              headers,
+              rejectUnauthorized: false,
+            },
+            (proxyRes) => {
+              res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
+              proxyRes.pipe(res);
+            }
+          );
+
+          proxyReq.on('error', (err) => {
+            res.statusCode = 502;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ message: `Proxy error connecting to router: ${err.message}` }));
+          });
+
+          if (bodyBuffer.length > 0) {
+            proxyReq.write(bodyBuffer);
+          }
+          proxyReq.end();
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ message: e.message || 'Internal proxy error' }));
+        }
+      });
+    },
+  };
 }
 
 /** Applies /.figma/make/site.json to the generated document shell. */

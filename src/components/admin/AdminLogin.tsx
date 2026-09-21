@@ -1,8 +1,11 @@
 import { useState } from "react";
 
-interface Props { onLogin: () => void; }
+interface Props {
+  onLogin: () => void;
+  onExitAdmin: () => void;
+}
 
-export default function AdminLogin({ onLogin }: Props) {
+export default function AdminLogin({ onLogin, onExitAdmin }: Props) {
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -10,10 +13,16 @@ export default function AdminLogin({ onLogin }: Props) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password) { setError("Enter your password to continue"); return; }
+    if (!password) {
+      setError("Enter your password to continue");
+      return;
+    }
     setError("");
     setLoading(true);
-    setTimeout(() => { setLoading(false); onLogin(); }, 1200);
+    setTimeout(() => {
+      setLoading(false);
+      onLogin();
+    }, 600);
   };
 
   return (
@@ -70,7 +79,7 @@ export default function AdminLogin({ onLogin }: Props) {
         {/* Bottom */}
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse" />
-          <p className="text-blue-300 text-xs">Network online · 47 active sessions · ₦195,000 today</p>
+          <p className="text-blue-300 text-xs">Live MikroTik RouterOS v7 Integration</p>
         </div>
       </div>
 
@@ -145,7 +154,17 @@ export default function AdminLogin({ onLogin }: Props) {
                   </svg>
                   Signing in…
                 </>
-              ) : "Sign In"}
+              ) : (
+                "Sign In"
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={onExitAdmin}
+              className="w-full bg-transparent hover:bg-gray-100 text-[#6B7280] font-medium text-sm py-2.5 rounded-xl transition-colors"
+            >
+              ← Back to Customer Portal
             </button>
           </form>
 

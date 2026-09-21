@@ -6,14 +6,23 @@ import { type Plan } from "../types";
 interface Props {
   plans: Plan[];
   setPlans: React.Dispatch<React.SetStateAction<Plan[]>>;
+  onExitAdmin: () => void;
 }
 
-export default function AdminApp({ plans, setPlans }: Props) {
+export default function AdminApp({ plans, setPlans, onExitAdmin }: Props) {
   const [loggedIn, setLoggedIn] = useState(false);
 
   return loggedIn ? (
-    <AdminShell plans={plans} setPlans={setPlans} onLogout={() => setLoggedIn(false)} />
+    <AdminShell
+      plans={plans}
+      setPlans={setPlans}
+      onLogout={() => setLoggedIn(false)}
+      onExitAdmin={onExitAdmin}
+    />
   ) : (
-    <AdminLogin onLogin={() => setLoggedIn(true)} />
+    <AdminLogin
+      onLogin={() => setLoggedIn(true)}
+      onExitAdmin={onExitAdmin}
+    />
   );
 }

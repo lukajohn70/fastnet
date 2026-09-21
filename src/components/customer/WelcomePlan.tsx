@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { type Plan } from "../../types";
 
 interface Props {
@@ -5,15 +6,33 @@ interface Props {
   selectedPlan: Plan;
   onSelectPlan: (p: Plan) => void;
   onPay: () => void;
+  onOpenAdmin: () => void;
 }
 
-export default function WelcomePlan({ plans, selectedPlan, onSelectPlan, onPay }: Props) {
+export default function WelcomePlan({ plans, selectedPlan, onSelectPlan, onPay, onOpenAdmin }: Props) {
+  const [logoClicks, setLogoClicks] = useState(0);
+
+  const handleLogoClick = () => {
+    const next = logoClicks + 1;
+    if (next >= 3) {
+      onOpenAdmin();
+      setLogoClicks(0);
+    } else {
+      setLogoClicks(next);
+      setTimeout(() => setLogoClicks(0), 1500);
+    }
+  };
+
   return (
     <div className="min-h-full flex flex-col">
       {/* Header */}
       <header className="bg-[#2563EB] px-6 md:px-10 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+        <div
+          onClick={handleLogoClick}
+          className="flex items-center gap-3 cursor-pointer select-none"
+          title="Wazobia FastNet"
+        >
+          <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0 active:scale-95 transition-transform">
             <WifiIcon />
           </div>
           <div>
@@ -210,8 +229,18 @@ export default function WelcomePlan({ plans, selectedPlan, onSelectPlan, onPay }
         </div>
       </div>
 
-      <footer className="px-6 py-4 text-center border-t border-gray-200 bg-white mt-4">
-        <p className="text-[#6B7280] text-xs">Wazobia FastNet · Powered by Starlink Satellite · Secure payments by Paystack</p>
+      <footer className="px-6 py-4 border-t border-gray-200 bg-white mt-4 flex items-center justify-center gap-1 text-[#6B7280] text-xs select-none">
+        <span>Wazobia FastNet · Powered by Starlink Satellite · Secure payments by Paystack</span>
+        <button
+          onClick={onOpenAdmin}
+          aria-label="Admin Access"
+          title=""
+          className="text-gray-300 hover:text-gray-500 transition-colors p-1 rounded-sm focus:outline-none"
+        >
+          <svg viewBox="0 0 16 16" className="w-2.5 h-2.5 opacity-30 hover:opacity-80" fill="currentColor">
+            <path fillRule="evenodd" d="M4 6V5a4 4 0 118 0v1h1a1 1 0 011 1v7a1 1 0 01-1 1H3a1 1 0 01-1-1V7a1 1 0 011-1h1zm2-1a2 2 0 114 0v1H6V5z" clipRule="evenodd" />
+          </svg>
+        </button>
       </footer>
     </div>
   );

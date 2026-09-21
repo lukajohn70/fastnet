@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { type Plan } from "../../types";
+import { fetchUserProfiles } from "../../services/mikrotik";
 
 interface Props {
   plans: Plan[];
@@ -22,6 +23,8 @@ type ModalState =
 
 export default function PlansManager({ plans, setPlans }: Props) {
   const [modal, setModal] = useState<ModalState>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
 
   const handleSave = (data: Omit<Plan, "id">, id?: string) => {
     if (id) {
@@ -38,26 +41,78 @@ export default function PlansManager({ plans, setPlans }: Props) {
     setModal(null);
   };
 
+  const handleSyncFromRouter = async () => {
+    setSyncing(true);
+    setSyncMsg("");
+    try {
+      const profiles = await fetchUserProfiles();
+      if (profiles.length === 0) {
+        setSyncMsg("No profiles found on router or router offline");
+        return;
+      }
+      const newPlans: Plan[] = profiles.map((p) => {
+        const existing = plans.find((pl) => pl.name.toLowerCase() === p.name.toLowerCase());
+        if (existing) return existing;
+        return {
+          id: `profile_${p.name}`,
+          name: p.name,
+          duration: p.rateLimit ? `${p.rateLimit} Speed` : "Standard Access",
+          price: 1000,
+          features: [
+            p.rateLimit ? `Rate limit: ${p.rateLimit}` : "Full speed",
+            p.sharedUsers ? `Shared: ${p.sharedUsers} device(s)` : "Single device",
+            "Instant access",
+          ],
+        };
+      });
+      setPlans(newPlans);
+      setSyncMsg(`Synced ${profiles.length} profiles from MikroTik!`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSyncMsg(`Sync error: ${msg}`);
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncMsg(""), 4000);
+    }
+  };
+
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-[#1F2937] font-bold text-lg">Hotspot Plans</h2>
           <p className="text-[#6B7280] text-sm mt-0.5">
-            These plans appear on the customer payment screen in real time.
+            Configured plans appear on the customer payment portal in real time.
           </p>
         </div>
-        <button
-          onClick={() => setModal({ type: "add" })}
-          className="flex items-center gap-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold text-sm px-4 py-2.5 rounded-xl shadow-md shadow-blue-200 transition-all"
-        >
-          <svg viewBox="0 0 16 16" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M8 3v10M3 8h10" />
-          </svg>
-          Add Plan
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleSyncFromRouter}
+            disabled={syncing}
+            className="flex items-center gap-1.5 bg-white hover:bg-gray-50 border border-gray-200 text-[#1F2937] font-medium text-xs px-3.5 py-2.5 rounded-xl transition-all shadow-sm"
+          >
+            <svg viewBox="0 0 16 16" className={`w-3.5 h-3.5 ${syncing ? "animate-spin text-[#2563EB]" : ""}`} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+              <path d="M13.5 8a5.5 5.5 0 11-1.6-3.9l1.6 1.4" /><path d="M13.5 2.5v3h-3" />
+            </svg>
+            Sync from Router
+          </button>
+          <button
+            onClick={() => setModal({ type: "add" })}
+            className="flex items-center gap-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold text-sm px-4 py-2.5 rounded-xl shadow-md shadow-blue-200 transition-all"
+          >
+            <svg viewBox="0 0 16 16" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M8 3v10M3 8h10" />
+            </svg>
+            Add Plan
+          </button>
+        </div>
       </div>
+      {syncMsg && (
+        <div className="text-xs bg-[#EFF6FF] text-[#1D4ED8] px-3.5 py-2 rounded-xl border border-blue-100">
+          {syncMsg}
+        </div>
+      )}
 
       {/* Plans grid */}
       <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">

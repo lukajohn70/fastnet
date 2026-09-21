@@ -13,6 +13,7 @@ interface Props {
   plans: Plan[];
   setPlans: React.Dispatch<React.SetStateAction<Plan[]>>;
   onLogout: () => void;
+  onExitAdmin: () => void;
 }
 
 const NAV: { id: Section; label: string; icon: React.ReactNode }[] = [
@@ -48,7 +49,7 @@ const NAV: { id: Section; label: string; icon: React.ReactNode }[] = [
   },
 ];
 
-export default function AdminShell({ plans, setPlans, onLogout }: Props) {
+export default function AdminShell({ plans, setPlans, onLogout, onExitAdmin }: Props) {
   const [section, setSection] = useState<Section>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -97,12 +98,21 @@ export default function AdminShell({ plans, setPlans, onLogout }: Props) {
         </nav>
 
         {/* Bottom */}
-        <div className="px-3 py-4 border-t border-white/10">
+        <div className="px-3 py-3 border-t border-white/10 space-y-1">
+          <button
+            onClick={onExitAdmin}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-blue-200 hover:bg-white/10 hover:text-white transition-all"
+          >
+            <svg viewBox="0 0 20 20" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            Customer Portal
+          </button>
           <button
             onClick={onLogout}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-blue-300 hover:bg-white/10 hover:text-white transition-all"
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-red-300 hover:bg-white/10 hover:text-white transition-all"
           >
-            <svg viewBox="0 0 20 20" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <svg viewBox="0 0 20 20" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
               <path d="M7 3H4a1 1 0 00-1 1v12a1 1 0 001 1h3M13 15l4-5-4-5M17 10H7" />
             </svg>
             Logout
@@ -133,10 +143,13 @@ export default function AdminShell({ plans, setPlans, onLogout }: Props) {
             </h2>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse" />
-              <span className="text-xs text-[#6B7280] hidden sm:block">Router Online</span>
-            </div>
+            <button
+              onClick={onExitAdmin}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              title="Return to Customer Hotspot view"
+            >
+              <span>← Customer View</span>
+            </button>
             <div className="w-8 h-8 rounded-full bg-[#2563EB] flex items-center justify-center text-white text-xs font-bold">
               AD
             </div>

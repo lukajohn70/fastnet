@@ -1,22 +1,5 @@
-import { useState } from "react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-
-const LOGS = [
-  { ref: "PAY-xkj29a", username: "user_ab12c", plan: "1 Hour", amount: 500, time: "08:14:22", status: "paid" },
-  { ref: "PAY-mnz88b", username: "user_cd34e", plan: "1 Hour", amount: 500, time: "08:02:45", status: "paid" },
-  { ref: "PAY-qrs12c", username: "user_ef56g", plan: "1 Hour", amount: 500, time: "07:55:11", status: "paid" },
-  { ref: "PAY-abc77d", username: "user_ij90k", plan: "1 Hour", amount: 500, time: "07:21:33", status: "paid" },
-  { ref: "PAY-def33e", username: "user_kl12m", plan: "1 Hour", amount: 500, time: "07:10:08", status: "paid" },
-  { ref: "PAY-fgh99f", username: "user_op23q", plan: "1 Hour", amount: 500, time: "06:58:50", status: "failed" },
-  { ref: "PAY-ijk44g", username: "user_rs45t", plan: "1 Hour", amount: 500, time: "06:45:19", status: "paid" },
-  { ref: "PAY-lmn55h", username: "user_uv67w", plan: "1 Hour", amount: 500, time: "06:30:02", status: "pending" },
-];
-
-const salesByPlan = [
-  { plan: "1 Hour", sales: 195000 },
-  { plan: "3 Hours", sales: 42000 },
-  { plan: "24 Hours", sales: 18000 },
-];
+import { useState, useEffect } from "react";
+import { getPaymentRecords, type PaymentRecord } from "../../services/mikrotik";
 
 const STATUS_STYLE: Record<string, string> = {
   paid: "bg-[#ECFDF5] text-[#065F46]",
@@ -25,11 +8,37 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 export default function PaymentLogs() {
+  const [logs, setLogs] = useState<PaymentRecord[]>([]);
   const [statusFilter, setStatusFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("today");
+  const [search, setSearch] = useState("");
 
-  const filtered = LOGS.filter((l) => statusFilter === "all" || l.status === statusFilter);
-  const totalPaid = filtered.filter((l) => l.status === "paid").reduce((s, l) => s + l.amount, 0);
+  const refreshLogs = () => {
+    setLogs(getPaymentRecords());
+  };
+
+  useEffect(() => {
+    refreshLogs();
+  }, []);
+
+  const filtered = logs.filter((l) => {
+    const matchStatus = statusFilter === "all" || l.status === statusFilter;
+    const matchSearch =
+      l.ref.toLowerCase().includes(search.toLowerCase()) ||
+      l.username.toLowerCase().includes(search.toLowerCase()) ||
+      l.planName.toLowerCase().includes(search.toLowerCase());
+    return matchStatus && matchSearch;
+  });
+
+  const totalPaid = logs
+    .filter((l) => l.status === "paid")
+    .reduce((s, l) => s + l.amount, 0);
+
+  // Group sales by plan dynamically
+  const planMap = new Map<string, number>();
+  logs.filter((l) => l.status === "paid").forEach((l) => {
+    planMap.set(l.planName, (planMap.get(l.planName) || 0) + l.amount);
+  });
+  const salesByPlan = Array.from(planMap.entries()).map(([plan, sales]) => ({ plan, sales }));
 
   return (
     <div className="space-y-4">
@@ -37,8 +46,8 @@ export default function PaymentLogs() {
       <div className="grid grid-cols-3 gap-3">
         {[
           { label: "Total Collected", value: `₦${totalPaid.toLocaleString()}`, color: "#10B981" },
-          { label: "Transactions", value: LOGS.filter((l) => l.status === "paid").length.toString(), color: "#2563EB" },
-          { label: "Failed", value: LOGS.filter((l) => l.status === "failed").length.toString(), color: "#EF4444" },
+          { label: "Successful Payments", value: logs.filter((l) => l.status === "paid").length.toString(), color: "#2563EB" },
+          { label: "Failed Attempts", value: logs.filter((l) => l.status === "failed").length.toString(), color: "#EF4444" },
         ].map(({ label, value, color }) => (
           <div key={label} className="bg-white rounded-2xl border border-gray-100 px-4 py-3 text-center">
             <p className="font-extrabold text-lg" style={{ color }}>{value}</p>
@@ -47,75 +56,97 @@ export default function PaymentLogs() {
         ))}
       </div>
 
-      {/* Chart */}
-      <div className="bg-white rounded-2xl border border-gray-100 p-5">
-        <h3 className="text-[#1F2937] font-semibold text-sm mb-4">Sales by Plan Today</h3>
-        <ResponsiveContainer width="100%" height={140}>
-          <BarChart data={salesByPlan} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" vertical={false} />
-            <XAxis dataKey="plan" tick={{ fontSize: 11, fill: "#9CA3AF" }} />
-            <YAxis tick={{ fontSize: 10, fill: "#9CA3AF" }} tickFormatter={(v) => `${v / 1000}k`} />
-            <Tooltip
-              formatter={(v) => [`₦${Number(v ?? 0).toLocaleString()}`, "Revenue"]}
-              contentStyle={{ background: "#1F2937", border: "none", borderRadius: "8px", color: "white", fontSize: "12px" }}
-            />
-            <Bar dataKey="sales" fill="#2563EB" radius={[6, 6, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+      {/* Sales by Plan breakdown if payments exist */}
+      {salesByPlan.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-100 p-4">
+          <h3 className="text-[#1F2937] font-semibold text-sm mb-3">Revenue by Hotspot Plan</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {salesByPlan.map((p) => (
+              <div key={p.plan} className="bg-[#F9FAFB] p-3 rounded-xl">
+                <span className="text-xs text-[#6B7280]">{p.plan}</span>
+                <p className="text-sm font-bold text-[#1F2937] mt-0.5">₦{p.sales.toLocaleString()}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2">
-        <select
-          value={dateFilter}
-          onChange={(e) => setDateFilter(e.target.value)}
-          className="px-3 py-2 text-sm border border-gray-200 rounded-xl bg-white text-[#1F2937] focus:outline-none"
+      {/* Filters toolbar */}
+      <div className="flex flex-wrap gap-2 items-center justify-between">
+        <div className="flex gap-2 flex-wrap">
+          <div className="relative">
+            <svg viewBox="0 0 16 16" className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#9CA3AF]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <circle cx="6.5" cy="6.5" r="4.5" /><path d="M10.5 10.5l3 3" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search reference / voucher…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8 pr-4 py-2 text-sm border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]/30 w-52"
+            />
+          </div>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-3 py-2 text-sm border border-gray-200 rounded-xl bg-white text-[#1F2937] focus:outline-none"
+          >
+            <option value="all">All Status ({logs.length})</option>
+            <option value="paid">Paid ({logs.filter(l => l.status === "paid").length})</option>
+            <option value="failed">Failed ({logs.filter(l => l.status === "failed").length})</option>
+            <option value="pending">Pending ({logs.filter(l => l.status === "pending").length})</option>
+          </select>
+        </div>
+        <button
+          onClick={refreshLogs}
+          className="px-3 py-2 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
         >
-          <option value="today">Today</option>
-          <option value="week">This Week</option>
-          <option value="month">This Month</option>
-        </select>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-2 text-sm border border-gray-200 rounded-xl bg-white text-[#1F2937] focus:outline-none"
-        >
-          <option value="all">All Status</option>
-          <option value="paid">Paid</option>
-          <option value="failed">Failed</option>
-          <option value="pending">Pending</option>
-        </select>
+          Refresh Logs
+        </button>
       </div>
 
       {/* Table */}
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm text-left">
             <thead>
-              <tr className="border-b border-gray-100 bg-[#F9FAFB]">
-                {["Tx Ref", "Username", "Plan", "Amount", "Time", "Status", "Comment"].map((h) => (
-                  <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-[#6B7280] uppercase tracking-wide whitespace-nowrap">
-                    {h}
-                  </th>
-                ))}
+              <tr className="border-b border-gray-100 bg-[#F9FAFB] text-[#6B7280] text-xs font-semibold">
+                <th className="py-3 px-4">Paystack Reference</th>
+                <th className="py-3 px-4">Voucher Username</th>
+                <th className="py-3 px-4">Plan</th>
+                <th className="py-3 px-4">Amount</th>
+                <th className="py-3 px-4">Timestamp</th>
+                <th className="py-3 px-4">Status</th>
               </tr>
             </thead>
-            <tbody>
-              {filtered.map((l) => (
-                <tr key={l.ref} className="border-b border-gray-50 hover:bg-[#F9FAFB] transition-colors">
-                  <td className="px-4 py-3 font-mono text-xs text-[#2563EB] font-semibold whitespace-nowrap">{l.ref}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-[#1F2937] whitespace-nowrap">{l.username}</td>
-                  <td className="px-4 py-3 text-[#1F2937] whitespace-nowrap">{l.plan}</td>
-                  <td className="px-4 py-3 font-semibold text-[#1F2937] whitespace-nowrap">₦{l.amount}</td>
-                  <td className="px-4 py-3 text-[#6B7280] text-xs whitespace-nowrap">{l.time}</td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full capitalize ${STATUS_STYLE[l.status]}`}>
-                      {l.status}
-                    </span>
+            <tbody className="divide-y divide-gray-50">
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-sm text-[#9CA3AF]">
+                    <div className="max-w-xs mx-auto space-y-1">
+                      <p className="font-semibold text-gray-600">No transactions recorded</p>
+                      <p className="text-xs text-gray-400">
+                        Customer payments completed via Paystack will be logged here immediately.
+                      </p>
+                    </div>
                   </td>
-                  <td className="px-4 py-3 text-[#6B7280] text-xs">Paystack · {l.ref}</td>
                 </tr>
-              ))}
+              ) : (
+                filtered.map((l) => (
+                  <tr key={l.ref} className="hover:bg-gray-50/70 transition-colors">
+                    <td className="py-3 px-4 font-mono font-medium text-[#1F2937]">{l.ref}</td>
+                    <td className="py-3 px-4 font-mono text-xs text-[#2563EB]">{l.username}</td>
+                    <td className="py-3 px-4 text-[#6B7280]">{l.planName}</td>
+                    <td className="py-3 px-4 font-semibold text-[#1F2937]">₦{l.amount.toLocaleString()}</td>
+                    <td className="py-3 px-4 text-[#6B7280] font-mono text-xs">{l.timestamp}</td>
+                    <td className="py-3 px-4">
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full capitalize ${STATUS_STYLE[l.status]}`}>
+                        {l.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

@@ -1,53 +1,60 @@
-import { useState } from "react";
-
-interface RouterConfig {
-  routerIp: string;
-  apiPort: string;
-  apiUser: string;
-  apiPassword: string;
-  hotspotProfile: string;
-  bridgeInterface: string;
-  useSsl: boolean;
-}
-
-const API_ERRORS = [
-  { time: "08:22:11", code: 401, message: "Unauthorized — check api_worker credentials" },
-  { time: "07:45:03", code: 500, message: "Connection timeout to 192.168.88.1" },
-  { time: "06:30:19", code: 404, message: "Endpoint /rest/ip/hotspot/user not found" },
-];
+import { useState, useEffect } from "react";
+import {
+  type RouterConfig,
+  getRouterConfig,
+  saveRouterConfig,
+  testConnection,
+  getAppSystemLogs,
+  type SystemResource,
+  type AppSystemLog,
+} from "../../services/mikrotik";
 
 export default function RouterSettings() {
-  const [config, setConfig] = useState<RouterConfig>({
-    routerIp: "192.168.88.1",
-    apiPort: "443",
-    apiUser: "api_worker",
-    apiPassword: "",
-    hotspotProfile: "hsprof1",
-    bridgeInterface: "bridge1",
-    useSsl: true,
-  });
+  const [config, setConfig] = useState<RouterConfig>(getRouterConfig);
   const [saved, setSaved] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [pinging, setPinging] = useState(false);
-  const [pingResult, setPingResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [pingResult, setPingResult] = useState<{ ok: boolean; msg: string; resource?: SystemResource } | null>(null);
+  const [errorLogs, setErrorLogs] = useState<AppSystemLog[]>([]);
+
+  useEffect(() => {
+    const errs = getAppSystemLogs().filter((l) => l.level === "error");
+    setErrorLogs(errs.slice(0, 10));
+  }, [pingResult]);
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    saveRouterConfig(config);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
 
-  const handlePing = () => {
+  const handlePing = async () => {
     setPinging(true);
     setPingResult(null);
-    setTimeout(() => {
+    try {
+      const res = await testConnection(config);
+      setPingResult({
+        ok: res.ok,
+        msg: res.message,
+        resource: res.resource,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setPingResult({
+        ok: false,
+        msg: `Connection failed: ${msg}`,
+      });
+    } finally {
       setPinging(false);
-      setPingResult({ ok: true, msg: `✓ Connected to ${config.routerIp}:${config.apiPort} — 18ms` });
-    }, 1400);
+    }
   };
 
   const set = (k: keyof RouterConfig) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setConfig((prev) => ({ ...prev, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
+    setConfig((prev) => ({
+      ...prev,
+      [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value,
+    }));
 
   return (
     <div className="space-y-5">
@@ -55,19 +62,19 @@ export default function RouterSettings() {
       <form onSubmit={handleSave} className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 bg-[#F9FAFB] flex items-center justify-between">
           <div>
-            <h3 className="text-[#1F2937] font-semibold text-sm">MikroTik API Configuration</h3>
-            <p className="text-[#6B7280] text-xs mt-0.5">Connect your router for live user management</p>
+            <h3 className="text-[#1F2937] font-semibold text-sm">MikroTik RouterOS v7 REST API Configuration</h3>
+            <p className="text-[#6B7280] text-xs mt-0.5">Direct integration for hotspot voucher generation and monitoring</p>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-[#10B981]" />
-            <span className="text-xs text-[#6B7280]">Online</span>
+            <div className={`w-2 h-2 rounded-full ${pingResult?.ok ? "bg-[#10B981]" : "bg-amber-400"}`} />
+            <span className="text-xs text-[#6B7280]">{pingResult?.ok ? "Connected" : "Configured"}</span>
           </div>
         </div>
 
         <div className="px-5 py-5 grid sm:grid-cols-2 gap-4">
-          <Field label="Router IP Address" placeholder="192.168.88.1" value={config.routerIp} onChange={set("routerIp")} />
-          <Field label="REST API Port" placeholder="443" value={config.apiPort} onChange={set("apiPort")} />
-          <Field label="API Username" placeholder="api_worker" value={config.apiUser} onChange={set("apiUser")} />
+          <Field label="Router IP Address" placeholder="10.12.12.1 or 192.168.88.1" value={config.routerIp} onChange={set("routerIp")} />
+          <Field label="REST API Port" placeholder="443 or 80" value={config.apiPort} onChange={set("apiPort")} />
+          <Field label="API Username" placeholder="admin or api_user" value={config.apiUser} onChange={set("apiUser")} />
 
           {/* Password field */}
           <div className="flex flex-col gap-1.5">
@@ -75,7 +82,7 @@ export default function RouterSettings() {
             <div className="relative">
               <input
                 type={showPassword ? "text" : "password"}
-                placeholder="Enter API password"
+                placeholder="Router admin password"
                 value={config.apiPassword}
                 onChange={set("apiPassword")}
                 className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-[#1F2937] placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#2563EB]/30 focus:border-[#2563EB] pr-10"
@@ -99,8 +106,8 @@ export default function RouterSettings() {
             </div>
           </div>
 
-          <Field label="Hotspot Profile" placeholder="hsprof1" value={config.hotspotProfile} onChange={set("hotspotProfile")} />
-          <Field label="Bridge Interface" placeholder="bridge1" value={config.bridgeInterface} onChange={set("bridgeInterface")} />
+          <Field label="Hotspot Profile" placeholder="default or hsprof1" value={config.hotspotProfile} onChange={set("hotspotProfile")} />
+          <Field label="Bridge Interface" placeholder="bridge1 or ether1" value={config.bridgeInterface} onChange={set("bridgeInterface")} />
 
           <div className="sm:col-span-2 flex items-center gap-3">
             <input
@@ -111,7 +118,7 @@ export default function RouterSettings() {
               className="w-4 h-4 rounded accent-[#2563EB]"
             />
             <label htmlFor="ssl" className="text-[#1F2937] text-sm font-medium">
-              Use HTTPS / SSL (www-ssl service)
+              Use HTTPS / SSL (RouterOS www-ssl service)
             </label>
           </div>
         </div>
@@ -131,7 +138,7 @@ export default function RouterSettings() {
               <svg viewBox="0 0 12 12" className="w-3.5 h-3.5" fill="none">
                 <path d="M2 6l3 3 5-5" stroke="#10B981" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              Saved!
+              Saved to Router Config!
             </span>
           )}
         </div>
@@ -139,12 +146,12 @@ export default function RouterSettings() {
 
       {/* Ping test */}
       <div className="bg-white rounded-2xl border border-gray-100 p-5">
-        <h3 className="text-[#1F2937] font-semibold text-sm mb-3">API Connectivity Test</h3>
+        <h3 className="text-[#1F2937] font-semibold text-sm mb-3">Live API Ping Test</h3>
         <div className="flex items-center gap-3 flex-wrap">
           <button
             onClick={handlePing}
             disabled={pinging}
-            className="flex items-center gap-2 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-70 text-white font-semibold text-sm px-5 py-2.5 rounded-xl transition-all"
+            className="flex items-center gap-2 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-70 text-white font-semibold text-sm px-5 py-2.5 rounded-xl transition-all shadow-sm"
           >
             {pinging ? (
               <>
@@ -152,62 +159,67 @@ export default function RouterSettings() {
                   <circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.3)" strokeWidth="3" />
                   <path d="M12 2a10 10 0 0110 10" stroke="white" strokeWidth="3" strokeLinecap="round" />
                 </svg>
-                Pinging {config.routerIp}…
+                Pinging {config.routerIp}:{config.apiPort}…
               </>
             ) : (
               <>
                 <svg viewBox="0 0 16 16" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
                   <circle cx="8" cy="8" r="6" /><path d="M8 5v3l2 2" />
                 </svg>
-                Test Connection
+                Test Router Connection
               </>
             )}
           </button>
           {pingResult && (
-            <span className={`text-sm font-medium px-3 py-1.5 rounded-xl ${pingResult.ok ? "text-[#10B981] bg-[#ECFDF5]" : "text-red-500 bg-red-50"}`}>
-              {pingResult.msg}
+            <span className={`text-sm font-medium px-3.5 py-2 rounded-xl flex items-center gap-1.5 ${pingResult.ok ? "text-[#10B981] bg-[#ECFDF5]" : "text-red-600 bg-red-50"}`}>
+              {pingResult.ok ? "✓" : "✗"} {pingResult.msg}
             </span>
           )}
         </div>
-      </div>
 
-      {/* Starlink read-only status */}
-      <div className="bg-white rounded-2xl border border-gray-100 p-5">
-        <h3 className="text-[#1F2937] font-semibold text-sm mb-4 flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-[#10B981]" />
-          Starlink Status (live)
-        </h3>
-        <div className="grid sm:grid-cols-3 gap-3">
-          {[
-            { label: "WAN IP", value: "197.242.xx.xx" },
-            { label: "Latency", value: "18ms" },
-            { label: "Uptime", value: "14d 6h 22m" },
-            { label: "Download", value: "148 Mbps" },
-            { label: "Upload", value: "22 Mbps" },
-            { label: "Dish Status", value: "Connected" },
-          ].map(({ label, value }) => (
-            <div key={label} className="bg-[#F9FAFB] rounded-xl px-4 py-3">
-              <p className="text-[#6B7280] text-xs">{label}</p>
-              <p className="text-[#10B981] font-semibold text-sm mt-0.5">{value}</p>
+        {/* Live Router Details if connected */}
+        {pingResult?.resource && (
+          <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-[#F9FAFB] p-3 rounded-xl">
+              <p className="text-xs text-[#6B7280]">Board Name</p>
+              <p className="text-sm font-bold text-[#1F2937] mt-0.5">{pingResult.resource.boardName}</p>
             </div>
-          ))}
-        </div>
+            <div className="bg-[#F9FAFB] p-3 rounded-xl">
+              <p className="text-xs text-[#6B7280]">RouterOS Version</p>
+              <p className="text-sm font-bold text-[#1F2937] mt-0.5">{pingResult.resource.version}</p>
+            </div>
+            <div className="bg-[#F9FAFB] p-3 rounded-xl">
+              <p className="text-xs text-[#6B7280]">Router Uptime</p>
+              <p className="text-sm font-bold text-[#1F2937] mt-0.5">{pingResult.resource.uptime}</p>
+            </div>
+            <div className="bg-[#F9FAFB] p-3 rounded-xl">
+              <p className="text-xs text-[#6B7280]">CPU Load</p>
+              <p className="text-sm font-bold text-[#1F2937] mt-0.5">{pingResult.resource.cpuLoad}%</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Error logs */}
       <div className="bg-white rounded-2xl border border-gray-100 p-5">
-        <h3 className="text-[#1F2937] font-semibold text-sm mb-3">Recent API Errors</h3>
-        <div className="space-y-2">
-          {API_ERRORS.map((e) => (
-            <div key={e.time} className="flex items-start gap-3 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
-              <span className="text-xs font-bold text-red-500 bg-red-100 px-2 py-0.5 rounded-lg flex-shrink-0">{e.code}</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-[#1F2937] text-sm font-medium">{e.message}</p>
-                <p className="text-[#9CA3AF] text-xs mt-0.5 font-mono">{e.time}</p>
+        <h3 className="text-[#1F2937] font-semibold text-sm mb-3">Live API Errors & Exceptions</h3>
+        {errorLogs.length === 0 ? (
+          <div className="p-6 text-center text-sm text-[#9CA3AF] bg-[#F9FAFB] rounded-xl">
+            No API errors recorded. All connection attempts healthy.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {errorLogs.map((e) => (
+              <div key={e.id} className="flex items-start gap-3 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                <span className="text-xs font-bold text-red-500 bg-red-100 px-2 py-0.5 rounded-lg flex-shrink-0">ERR</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[#1F2937] text-sm font-medium break-all">{e.event}</p>
+                  <p className="text-[#9CA3AF] text-xs mt-0.5 font-mono">{e.time}</p>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

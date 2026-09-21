@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getRouterConfig } from "../../services/mikrotik";
 
 interface Props {
   voucher: { username: string; password: string };
@@ -9,6 +10,7 @@ export default function MikroTikLogin({ voucher }: Props) {
   const [password, setPassword] = useState(voucher.password);
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  const routerIp = getRouterConfig().routerIp;
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,7 +32,7 @@ export default function MikroTikLogin({ voucher }: Props) {
         </div>
         <div>
           <h1 className="text-white font-bold text-lg">Wazobia FastNet Hotspot</h1>
-          <p className="text-blue-200 text-xs">Hotspot Login · 10.12.12.1</p>
+          <p className="text-blue-200 text-xs">Hotspot Login · {routerIp}</p>
         </div>
       </header>
 
@@ -58,7 +60,7 @@ export default function MikroTikLogin({ voucher }: Props) {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-[#6B7280]">Gateway</span>
-                  <span className="text-[#1F2937] font-mono text-xs">10.12.12.1</span>
+                  <span className="text-[#1F2937] font-mono text-xs">{routerIp}</span>
                 </div>
               </div>
               <p className="text-[#6B7280] text-xs">Your browser will redirect to your requested page automatically.</p>
