@@ -89,7 +89,9 @@ function mikrotikProxyPlugin(): Plugin {
             res.end(JSON.stringify({ error: 'Missing target query parameter' }));
             return;
           }
-          const fullTargetUrl = new URL(pathSuffix, target.endsWith('/') ? target : target + '/').href;
+          const cleanTarget = target.replace(/\/+$/, '');
+          const cleanSuffix = pathSuffix.replace(/^\/+/, '');
+          const fullTargetUrl = cleanSuffix ? `${cleanTarget}/${cleanSuffix}` : cleanTarget;
           const targetUrlObj = new URL(fullTargetUrl);
           const isHttps = targetUrlObj.protocol === 'https:';
           const clientModule = isHttps ? await import('node:https') : await import('node:http');

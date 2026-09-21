@@ -54,6 +54,20 @@ export interface RouterLogEntry {
   message: string;
 }
 
+export interface ConnectionEntry {
+  id: string;
+  srcAddress: string;
+  dstAddress: string;
+  protocol: string;
+  tcpState?: string;
+  origBytes: number;
+  respBytes: number;
+  timeout: string;
+  // Resolved
+  srcUser?: string;
+  dstHost?: string;
+}
+
 export interface PaymentRecord {
   ref: string;
   username: string;
@@ -78,7 +92,7 @@ const LOGS_KEY = "fastnet_system_logs";
 export const DEFAULT_CONFIG: RouterConfig = {
   routerIp: "10.12.12.1",
   apiPort: "80",
-  apiUser: "admin",
+  apiUser: "fastnet_api",
   apiPassword: "",
   hotspotProfile: "default",
   bridgeInterface: "bridge1",
@@ -161,11 +175,13 @@ async function requestRouter<T>(
 ): Promise<T> {
   const cfg = overrideConfig || getRouterConfig();
   const directBase = getDirectBaseUrl(cfg);
-  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  // Strip leading slash — proxy plugin concatenates target/path itself
+  const cleanPath = path.replace(/^\/+/, "");
+  const cleanPathWithSlash = `/${cleanPath}`;
 
-  // Try via proxy first (bypasses browser CORS & self-signed SSL errors), then fallback to direct
+  // Try via Vite dev proxy first (bypasses browser CORS & self-signed SSL errors)
   const proxyUrl = `/api/mikrotik?target=${encodeURIComponent(directBase)}&path=${encodeURIComponent(cleanPath)}`;
-  const directUrl = `${directBase}${cleanPath}`;
+  const directUrl = `${directBase}${cleanPathWithSlash}`;
 
   const headers: Record<string, string> = {
     Authorization: getAuthHeader(cfg),
@@ -184,12 +200,16 @@ async function requestRouter<T>(
       headers,
       body: body ? JSON.stringify(body) : undefined,
     });
-    // If proxy endpoint is 404/500 (e.g. in static production build), fallback to direct
-    if (res.status === 404) {
-      throw new Error("Proxy not found");
+    // Proxy returns its own 404 only when the /api/mikrotik route doesn't exist
+    // (e.g. static build). A RouterOS 404 comes with Content-Type: application/json.
+    const isProxyMissing =
+      res.status === 404 &&
+      !(res.headers.get("content-type") || "").includes("application/json");
+    if (isProxyMissing) {
+      throw new Error("Proxy not available");
     }
   } catch {
-    // Fallback to direct call
+    // Fallback: call the router directly (works only when no CORS block)
     res = await fetch(directUrl, {
       method,
       headers,
@@ -365,6 +385,44 @@ export async function kickActiveSession(id: string): Promise<void> {
 export async function deleteHotspotUser(id: string): Promise<void> {
   await requestRouter(`/ip/hotspot/user/${encodeURIComponent(id)}`, "DELETE");
   logAppEvent("admin", "info", `Deleted hotspot user: ${id}`);
+}
+
+export async function updateHotspotUser(
+  id: string,
+  data: { profile?: string; comment?: string; limitUptime?: string; password?: string }
+): Promise<void> {
+  const payload: Record<string, string> = {};
+  if (data.profile) payload.profile = data.profile;
+  if (data.comment !== undefined) payload.comment = data.comment;
+  if (data.limitUptime !== undefined) payload["limit-uptime"] = data.limitUptime;
+  if (data.password) payload.password = data.password;
+  await requestRouter(`/ip/hotspot/user/${encodeURIComponent(id)}`, "PATCH", payload);
+  logAppEvent("admin", "info", `Updated hotspot user: ${id}`);
+}
+
+export async function toggleHotspotUser(id: string, disabled: boolean): Promise<void> {
+  await requestRouter(`/ip/hotspot/user/${encodeURIComponent(id)}`, "PATCH", { disabled: disabled ? "true" : "false" });
+  logAppEvent("admin", "info", `User ${id} ${disabled ? "disabled" : "enabled"}`);
+}
+
+export async function fetchConnectionTracking(): Promise<ConnectionEntry[]> {
+  try {
+    const raw = await requestRouter<Array<Record<string, unknown>>>("/ip/firewall/connection");
+    if (!Array.isArray(raw)) return [];
+    return raw.slice(0, 200).map((c) => ({
+      id: String(c[".id"] || ""),
+      srcAddress: String(c["src-address"] || ""),
+      dstAddress: String(c["dst-address"] || ""),
+      protocol: String(c.protocol || "unknown"),
+      tcpState: c["tcp-state"] ? String(c["tcp-state"]) : undefined,
+      origBytes: Number(c["orig-bytes"] ?? 0),
+      respBytes: Number(c["repl-bytes"] ?? 0),
+      timeout: String(c.timeout || ""),
+    }));
+  } catch (err) {
+    console.warn("Failed to fetch connection tracking:", err);
+    return [];
+  }
 }
 
 export async function fetchRouterLogs(): Promise<RouterLogEntry[]> {
