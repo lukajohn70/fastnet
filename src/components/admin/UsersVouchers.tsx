@@ -6,6 +6,7 @@ import {
   fetchUserProfiles,
   fetchConnectionTracking,
   fetchDnsCache,
+  batchReverseDns,
   createHotspotUser,
   updateHotspotUser,
   toggleHotspotUser,
@@ -160,21 +161,37 @@ export default function UsersVouchers() {
   const loadConnections = async () => {
     setConnLoading(true);
     try {
-      // Fetch connections and DNS cache in parallel
-      const [conns, dns] = await Promise.all([
+      // 1. Fetch connections + router DNS cache in parallel
+      const [conns, routerDns] = await Promise.all([
         fetchConnectionTracking(),
         fetchDnsCache(),
       ]);
-      setDnsMap(dns);
+
+      // 2. Build user IP → username map
       const ipToUser = new Map<string, string>();
       sessions.forEach((s) => ipToUser.set(s.address.split(":")[0], s.user));
+
+      // 3. Collect all unique destination IPs for reverse-DNS
+      const dstIps = [...new Set(conns.map((c) => c.dstAddress.split(":")[0]))];
+
+      // 4. Run reverse-DNS on all destination IPs (uses Cloudflare DoH)
+      const rdns = await batchReverseDns(dstIps);
+
+      // 5. Merge router DNS + reverse-DNS (prefer router DNS cache since it has actual user-visited domains, fallback to reverse-DNS PTR)
+      const mergedDns = new Map<string, string>([...rdns]);
+      routerDns.forEach((hostname, ip) => {
+        mergedDns.set(ip, hostname);
+      });
+      setDnsMap(mergedDns);
+
+      // 6. Annotate connections with resolved user + hostname
       const annotated = conns.map((c) => {
         const srcIp = c.srcAddress.split(":")[0];
         const dstIp = c.dstAddress.split(":")[0];
         return {
           ...c,
           srcUser: ipToUser.get(srcIp),
-          dstHost: dns.get(dstIp),
+          dstHost: mergedDns.get(dstIp),
         };
       });
       setConnections(annotated);
@@ -971,10 +988,11 @@ function UserConnectionsModal({ user, allConnections, sessions, dnsMap, onClose,
   loading: boolean;
 }) {
   const userConns = useMemo(() => {
-    const userIp = sessions.find((s) => s.user === user.name)?.address?.split(":")[0];
-    if (!userIp) return [];
-    return allConnections.filter((c) => c.srcAddress.startsWith(userIp));
-  }, [allConnections, sessions, user.name]);
+    const userIp = user.ip || sessions.find((s) => s.user === user.name)?.address?.split(":")[0];
+    return allConnections.filter(
+      (c) => (userIp && c.srcAddress.startsWith(userIp)) || (c.srcUser && c.srcUser === user.name)
+    );
+  }, [allConnections, sessions, user.name, user.ip]);
 
   const portLabel: Record<string, string> = { "80": "HTTP", "443": "HTTPS", "53": "DNS", "25": "SMTP", "587": "SMTP", "22": "SSH", "21": "FTP" };
 

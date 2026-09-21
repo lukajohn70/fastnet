@@ -429,8 +429,65 @@ export async function fetchConnectionTracking(): Promise<ConnectionEntry[]> {
 }
 
 
+/** In-memory reverse-DNS cache so we don't re-query the same IP repeatedly */
+const rdnsCache = new Map<string, string>();
+
+/**
+ * Reverse-DNS lookup for a single IP using Cloudflare DNS-over-HTTPS (1.1.1.1).
+ * Returns the PTR hostname (e.g. "lga34s27-in-f14.1e100.net" → simplified) or null.
+ */
+async function reverseDnsLookup(ip: string): Promise<string | null> {
+  if (rdnsCache.has(ip)) return rdnsCache.get(ip)!;
+  // Ignore local / private IPs to avoid unnecessary external DNS queries
+  if (
+    !ip ||
+    ip.startsWith("10.") ||
+    ip.startsWith("192.168.") ||
+    ip.startsWith("127.") ||
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(ip)
+  ) {
+    return null;
+  }
+  try {
+    // Build PTR query: reverse the octets and append .in-addr.arpa
+    const ptr = ip.split(".").reverse().join(".") + ".in-addr.arpa";
+    const res = await fetch(
+      `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(ptr)}&type=PTR`,
+      {
+        headers: { Accept: "application/dns-json" },
+        signal: AbortSignal.timeout(3000),
+      }
+    );
+    if (!res.ok) return null;
+    const data = await res.json() as { Answer?: Array<{ data: string }> };
+    if (!data.Answer?.length) return null;
+    // PTR data ends with a dot — trim it
+    const hostname = data.Answer[0].data.replace(/\.$/, "");
+    rdnsCache.set(ip, hostname);
+    return hostname;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve a list of unique IPs to hostnames concurrently (max 15 parallel).
+ * Returns a Map<ip, hostname>.
+ */
+export async function batchReverseDns(ips: string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(ips)].filter((ip) => ip && !rdnsCache.has(ip));
+  // Process in chunks to avoid flooding
+  const CHUNK = 15;
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    await Promise.all(unique.slice(i, i + CHUNK).map(reverseDnsLookup));
+  }
+  // Return full map including already-cached entries
+  const result = new Map<string, string>();
+  ips.forEach((ip) => { if (rdnsCache.has(ip)) result.set(ip, rdnsCache.get(ip)!); });
+  return result;
+}
+
 /** Fetch the router DNS cache and return a Map of IP → hostname.
- *  This lets us resolve destination IPs in connection tracking to real domain names.
  *  RouterOS DNS cache format: { name: "example.com", data: "1.2.3.4", type: "A" } */
 export async function fetchDnsCache(): Promise<Map<string, string>> {
   const map = new Map<string, string>();
@@ -444,7 +501,8 @@ export async function fetchDnsCache(): Promise<Map<string, string>> {
       const hostname = String(entry.name || "");
       const ip = String(entry.data || "");
       if (hostname && ip && ip.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
-        // Map IP → shortest hostname (prefer non-CDN names)
+        // Also seed the rdns cache so batchReverseDns doesn't re-query these
+        if (!rdnsCache.has(ip)) rdnsCache.set(ip, hostname);
         const existing = map.get(ip);
         if (!existing || hostname.length < existing.length) {
           map.set(ip, hostname);
