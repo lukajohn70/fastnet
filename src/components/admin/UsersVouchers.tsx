@@ -92,7 +92,15 @@ export default function UsersVouchers() {
   const [modal, setModal] = useState<ModalState>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [sessions, setSessions] = useState<HotspotActiveUser[]>([]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 5000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   const loadUsers = async () => {
     setLoading(true);
@@ -276,10 +284,45 @@ export default function UsersVouchers() {
   };
 
   const handleToggle = async (user: DisplayUser) => {
-    setActionLoading(true);
-    try { await toggleHotspotUser(user.id, !user.rawDisabled); await loadUsers(); }
-    catch { /* silent */ }
-    finally { setActionLoading(false); }
+    const willDisable = !user.rawDisabled;
+    const actionVerb = willDisable ? "disable" : "enable";
+    const pastVerb = willDisable ? "disabled" : "enabled";
+
+    setTogglingId(user.id);
+    setActionError("");
+    try {
+      await toggleHotspotUser(user.id, willDisable);
+      // If disabling an active user, also kick session to drop connection immediately
+      if (willDisable && user.activeId) {
+        try { await kickActiveSession(user.activeId); } catch { /* ignore */ }
+      }
+      // Optimistically update the user in UI
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === user.id
+            ? {
+                ...u,
+                rawDisabled: willDisable,
+                status: willDisable ? "disabled" : (u.activeId ? "active" : "offline"),
+              }
+            : u
+        )
+      );
+      setToast({
+        type: "success",
+        message: `User "${user.name}" ${pastVerb} successfully.`,
+      });
+      await loadUsers();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : `Failed to ${actionVerb} user`;
+      setActionError(msg);
+      setToast({
+        type: "error",
+        message: `Could not ${actionVerb} "${user.name}": ${msg}`,
+      });
+    } finally {
+      setTogglingId(null);
+    }
   };
 
   const handleBulkDelete = async () => {
@@ -317,7 +360,37 @@ export default function UsersVouchers() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 relative">
+      {/* Floating Toast Notification */}
+      {toast && (
+        <div
+          className={`fixed top-5 right-5 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl shadow-xl border backdrop-blur-md transition-all duration-300 animate-in fade-in slide-in-from-top-3 ${
+            toast.type === "success"
+              ? "bg-emerald-950/90 text-emerald-100 border-emerald-600/40 shadow-emerald-950/20"
+              : "bg-red-950/90 text-red-100 border-red-600/40 shadow-red-950/20"
+          }`}
+        >
+          {toast.type === "success" ? (
+            <svg viewBox="0 0 20 20" className="w-5 h-5 text-emerald-400 shrink-0" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 20 20" className="w-5 h-5 text-red-400 shrink-0" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+            </svg>
+          )}
+          <span className="text-xs font-medium max-w-sm">{toast.message}</span>
+          <button
+            onClick={() => setToast(null)}
+            className="text-white/60 hover:text-white ml-2 p-1 rounded-lg transition-colors"
+          >
+            <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M3 3l10 10M13 3L3 13" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       {/* Tab bar */}
       <div className="flex gap-1 bg-white border border-gray-100 rounded-2xl p-1 w-fit">
         {(["users", "connections"] as const).map((t) => (
@@ -546,16 +619,27 @@ export default function UsersVouchers() {
                             )}
                             <button
                               onClick={() => handleToggle(u)}
-                              title={u.rawDisabled ? "Enable user" : "Disable user"}
-                              className={`p-1.5 rounded-lg transition-colors ${u.rawDisabled ? "hover:bg-emerald-50 text-gray-400 hover:text-emerald-600" : "hover:bg-amber-50 text-gray-400 hover:text-amber-600"}`}
+                              disabled={togglingId === u.id || actionLoading}
+                              title={u.rawDisabled ? "Click to enable user" : "Click to disable user"}
+                              className={`p-1.5 rounded-lg transition-all flex items-center justify-center ${
+                                u.rawDisabled
+                                  ? "hover:bg-emerald-100 text-emerald-600 bg-emerald-50 border border-emerald-200"
+                                  : "hover:bg-amber-100 text-amber-600 bg-amber-50 border border-amber-200"
+                              } ${togglingId === u.id ? "opacity-75 cursor-not-allowed" : ""}`}
                             >
-                              {u.rawDisabled ? (
-                                <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-                                  <path d="M3 8h10M8 3v10" />
+                              {togglingId === u.id ? (
+                                <svg className="w-3.5 h-3.5 animate-spin text-current" viewBox="0 0 24 24" fill="none">
+                                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.2"/>
+                                  <path d="M12 2a10 10 0 0110 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/>
+                                </svg>
+                              ) : u.rawDisabled ? (
+                                <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                                  <path d="M8 2v5M4.5 4.5a5 5 0 107 0" />
                                 </svg>
                               ) : (
-                                <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-                                  <circle cx="8" cy="8" r="6" /><path d="M6 8l1.5 1.5 3-3" />
+                                <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                                  <circle cx="8" cy="8" r="6" />
+                                  <line x1="3.5" y1="3.5" x2="12.5" y2="12.5" />
                                 </svg>
                               )}
                             </button>
@@ -740,7 +824,27 @@ export default function UsersVouchers() {
       )}
 
       {modal?.type === "view" && (
-        <UserDetailModal user={modal.user} onClose={() => setModal(null)} onEdit={() => setModal({ type: "edit", user: modal.user })} />
+        <UserDetailModal
+          user={modal.user}
+          onClose={() => setModal(null)}
+          onEdit={() => setModal({ type: "edit", user: modal.user })}
+          onToggle={async () => {
+            await handleToggle(modal.user);
+            setModal((prev) =>
+              prev?.type === "view"
+                ? {
+                    ...prev,
+                    user: {
+                      ...prev.user,
+                      rawDisabled: !prev.user.rawDisabled,
+                      status: !prev.user.rawDisabled ? "disabled" : "offline",
+                    },
+                  }
+                : null
+            );
+          }}
+          toggling={togglingId === modal.user.id}
+        />
       )}
 
       {modal?.type === "add" && (
@@ -815,10 +919,18 @@ export default function UsersVouchers() {
   );
 }
 
-function UserDetailModal({ user, onClose, onEdit }: {
+function UserDetailModal({
+  user,
+  onClose,
+  onEdit,
+  onToggle,
+  toggling,
+}: {
   user: DisplayUser;
   onClose: () => void;
   onEdit: () => void;
+  onToggle: () => void;
+  toggling: boolean;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
@@ -854,13 +966,41 @@ function UserDetailModal({ user, onClose, onEdit }: {
             </div>
           ))}
         </div>
-        <div className="px-5 pb-5 flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 font-medium">
-            Close
+        <div className="px-5 pb-5 flex items-center justify-between gap-2">
+          <button
+            onClick={onToggle}
+            disabled={toggling}
+            className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
+              user.rawDisabled
+                ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200"
+                : "bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200"
+            }`}
+          >
+            {toggling ? (
+              <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.2"/>
+                <path d="M12 2a10 10 0 0110 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/>
+              </svg>
+            ) : user.rawDisabled ? (
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                <path d="M8 2v5M4.5 4.5a5 5 0 107 0" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                <circle cx="8" cy="8" r="6" />
+                <line x1="3.5" y1="3.5" x2="12.5" y2="12.5" />
+              </svg>
+            )}
+            {user.rawDisabled ? "Enable User" : "Disable User"}
           </button>
-          <button onClick={onEdit} className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-xl text-sm font-semibold shadow-md shadow-blue-200 transition-all">
-            Edit User
-          </button>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 font-medium">
+              Close
+            </button>
+            <button onClick={onEdit} className="px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-xl text-sm font-semibold shadow-md shadow-blue-200 transition-all">
+              Edit User
+            </button>
+          </div>
         </div>
       </div>
     </div>

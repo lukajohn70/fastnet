@@ -169,7 +169,7 @@ function getAuthHeader(cfg: RouterConfig): string {
 
 async function requestRouter<T>(
   path: string,
-  method: "GET" | "POST" | "PUT" | "DELETE" = "GET",
+  method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" = "GET",
   body?: unknown,
   overrideConfig?: RouterConfig
 ): Promise<T> {
@@ -404,8 +404,56 @@ export async function updateHotspotUser(
 }
 
 export async function toggleHotspotUser(id: string, disabled: boolean): Promise<void> {
-  await requestRouter(`/ip/hotspot/user/${encodeURIComponent(id)}`, "PATCH", { disabled: disabled ? "true" : "false" });
-  logAppEvent("admin", "info", `User ${id} ${disabled ? "disabled" : "enabled"}`);
+  const encId = encodeURIComponent(id);
+  let lastError: Error | null = null;
+
+  // Try 1: PATCH /ip/hotspot/user/{id} with RouterOS standard string "yes" / "no"
+  try {
+    await requestRouter(`/ip/hotspot/user/${encId}`, "PATCH", {
+      disabled: disabled ? "yes" : "no",
+    });
+    logAppEvent("admin", "info", `User ${id} ${disabled ? "disabled" : "enabled"}`);
+    return;
+  } catch (err) {
+    lastError = err instanceof Error ? err : new Error(String(err));
+  }
+
+  // Try 2: PATCH /ip/hotspot/user/{id} with boolean literal true/false
+  try {
+    await requestRouter(`/ip/hotspot/user/${encId}`, "PATCH", {
+      disabled: Boolean(disabled),
+    });
+    logAppEvent("admin", "info", `User ${id} ${disabled ? "disabled" : "enabled"}`);
+    return;
+  } catch (err) {
+    lastError = err instanceof Error ? err : new Error(String(err));
+  }
+
+  // Try 3: POST /ip/hotspot/user/set with numbers: id
+  try {
+    await requestRouter(`/ip/hotspot/user/set`, "POST", {
+      numbers: id,
+      disabled: disabled ? "yes" : "no",
+    });
+    logAppEvent("admin", "info", `User ${id} ${disabled ? "disabled" : "enabled"}`);
+    return;
+  } catch (err) {
+    lastError = err instanceof Error ? err : new Error(String(err));
+  }
+
+  // Try 4: POST /ip/hotspot/user/set with .id
+  try {
+    await requestRouter(`/ip/hotspot/user/set`, "POST", {
+      ".id": id,
+      disabled: disabled ? "yes" : "no",
+    });
+    logAppEvent("admin", "info", `User ${id} ${disabled ? "disabled" : "enabled"}`);
+    return;
+  } catch (err) {
+    lastError = err instanceof Error ? err : new Error(String(err));
+  }
+
+  throw lastError || new Error(`Failed to toggle user ${id} on router`);
 }
 
 export async function fetchConnectionTracking(): Promise<ConnectionEntry[]> {
