@@ -430,18 +430,25 @@ export async function fetchConnectionTracking(): Promise<ConnectionEntry[]> {
 
 
 /** Fetch the router DNS cache and return a Map of IP → hostname.
- *  This lets us resolve destination IPs in connection tracking to real domain names. */
+ *  This lets us resolve destination IPs in connection tracking to real domain names.
+ *  RouterOS DNS cache format: { name: "example.com", data: "1.2.3.4", type: "A" } */
 export async function fetchDnsCache(): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   try {
     const raw = await requestRouter<Array<Record<string, unknown>>>("/ip/dns/cache");
     if (!Array.isArray(raw)) return map;
     raw.forEach((entry) => {
-      const name = String(entry.name || entry.address || "");
-      const address = String(entry.address || entry.data || "");
-      if (name && address && address.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
-        // address is an IP → map it to the hostname
-        if (!map.has(address)) map.set(address, name);
+      const type = String(entry.type || "");
+      // Only care about A records: name = hostname, data = IPv4
+      if (type !== "A") return;
+      const hostname = String(entry.name || "");
+      const ip = String(entry.data || "");
+      if (hostname && ip && ip.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
+        // Map IP → shortest hostname (prefer non-CDN names)
+        const existing = map.get(ip);
+        if (!existing || hostname.length < existing.length) {
+          map.set(ip, hostname);
+        }
       }
     });
   } catch (err) {
