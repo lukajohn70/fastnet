@@ -1,0 +1,10 @@
+{
+  "description": "Streamlines project management by organizing tasks and deadlines, helping teams collaborate efficiently and meet goals on time.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
