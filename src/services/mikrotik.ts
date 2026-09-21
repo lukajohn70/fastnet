@@ -77,12 +77,12 @@ const LOGS_KEY = "fastnet_system_logs";
 
 export const DEFAULT_CONFIG: RouterConfig = {
   routerIp: "10.12.12.1",
-  apiPort: "443",
+  apiPort: "80",
   apiUser: "admin",
   apiPassword: "",
   hotspotProfile: "default",
   bridgeInterface: "bridge1",
-  useSsl: true,
+  useSsl: false,
 };
 
 export function getRouterConfig(): RouterConfig {
