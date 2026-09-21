@@ -10,7 +10,41 @@
     "preview": "vite preview",
     "desktop": "electron .",
     "desktop:build": "vite build && electron-builder",
+    "build:dmg": "vite build && electron-builder --mac",
+    "build:win": "vite build && electron-builder --win",
+    "build:all": "vite build && electron-builder -mw",
     "format": "oxfmt"
+  },
+  "build": {
+    "appId": "com.wazobia.fastnet",
+    "productName": "FastNet",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.business"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   },
   "dependencies": {
     "react": "^19.0.0",
@@ -31,3 +65,4 @@
     "electron-builder": "^25.1.8"
   }
 }
+
