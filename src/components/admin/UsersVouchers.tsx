@@ -5,6 +5,7 @@ import {
   fetchActiveSessions,
   fetchUserProfiles,
   fetchConnectionTracking,
+  fetchDnsCache,
   createHotspotUser,
   updateHotspotUser,
   toggleHotspotUser,
@@ -77,6 +78,7 @@ export default function UsersVouchers() {
   const [users, setUsers] = useState<DisplayUser[]>([]);
   const [profiles, setProfiles] = useState<HotspotProfile[]>([]);
   const [connections, setConnections] = useState<ConnectionEntry[]>([]);
+  const [dnsMap, setDnsMap] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [connLoading, setConnLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -158,12 +160,22 @@ export default function UsersVouchers() {
   const loadConnections = async () => {
     setConnLoading(true);
     try {
-      const conns = await fetchConnectionTracking();
+      // Fetch connections and DNS cache in parallel
+      const [conns, dns] = await Promise.all([
+        fetchConnectionTracking(),
+        fetchDnsCache(),
+      ]);
+      setDnsMap(dns);
       const ipToUser = new Map<string, string>();
       sessions.forEach((s) => ipToUser.set(s.address.split(":")[0], s.user));
       const annotated = conns.map((c) => {
         const srcIp = c.srcAddress.split(":")[0];
-        return { ...c, srcUser: ipToUser.get(srcIp) };
+        const dstIp = c.dstAddress.split(":")[0];
+        return {
+          ...c,
+          srcUser: ipToUser.get(srcIp),
+          dstHost: dns.get(dstIp),
+        };
       });
       setConnections(annotated);
     } catch {
@@ -501,7 +513,11 @@ export default function UsersVouchers() {
                             </button>
                             {u.status === "active" && (
                               <button
-                                onClick={() => setModal({ type: "connections", user: u })}
+                              onClick={() => {
+                                setModal({ type: "connections", user: u });
+                                // Always refresh connections when opening this modal
+                                loadConnections();
+                              }}
                                 title="View IP connections"
                                 className="p-1.5 rounded-lg hover:bg-purple-50 text-gray-400 hover:text-purple-600 transition-colors"
                               >
@@ -647,6 +663,7 @@ export default function UsersVouchers() {
                       const portLabel: Record<string, string> = { "80": "HTTP", "443": "HTTPS", "53": "DNS", "25": "SMTP", "587": "SMTP" };
                       const isHTTPS = dstPort === "443";
                       const isHTTP = dstPort === "80";
+                      const hostname = c.dstHost || dnsMap.get(dstIp);
                       return (
                         <tr key={c.id} className="hover:bg-gray-50/60 transition-colors">
                           <td className="py-2.5 px-4">
@@ -658,12 +675,26 @@ export default function UsersVouchers() {
                               <span className="text-gray-300 text-[11px]">unknown</span>
                             )}
                           </td>
-                          <td className="py-2.5 px-4 font-mono text-[#1F2937]">{c.srcAddress}</td>
-                          <td className="py-2.5 px-4 font-mono">
-                            <div className="text-[#1F2937]">{dstIp}</div>
-                            {dstPort && (
-                              <div className={`text-[10px] font-semibold ${isHTTPS ? "text-emerald-600" : isHTTP ? "text-amber-600" : "text-gray-400"}`}>
-                                :{dstPort}{portLabel[dstPort] ? ` (${portLabel[dstPort]})` : ""}
+                          <td className="py-2.5 px-4 font-mono text-[#1F2937] text-[11px]">{c.srcAddress}</td>
+                          <td className="py-2.5 px-4">
+                            {hostname ? (
+                              <div>
+                                <div className="text-[#1F2937] font-semibold text-[12px] max-w-[180px] truncate" title={hostname}>
+                                  {hostname}
+                                </div>
+                                <div className="text-[10px] text-gray-400 font-mono">
+                                  {dstIp}{dstPort && `:${dstPort}`}
+                                  {dstPort && portLabel[dstPort] && <span className={`ml-1 font-semibold ${isHTTPS ? "text-emerald-600" : isHTTP ? "text-amber-600" : "text-gray-400"}`}>({portLabel[dstPort]})</span>}
+                                </div>
+                              </div>
+                            ) : (
+                              <div>
+                                <div className="text-[#1F2937] font-mono text-[12px]">{dstIp}</div>
+                                {dstPort && (
+                                  <div className={`text-[10px] font-semibold ${isHTTPS ? "text-emerald-600" : isHTTP ? "text-amber-600" : "text-gray-400"}`}>
+                                    :{dstPort}{portLabel[dstPort] ? ` (${portLabel[dstPort]})` : ""}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </td>
@@ -731,6 +762,7 @@ export default function UsersVouchers() {
           user={modal.user}
           allConnections={connections}
           sessions={sessions}
+          dnsMap={dnsMap}
           onClose={() => setModal(null)}
           onRefresh={loadConnections}
           loading={connLoading}
@@ -929,10 +961,11 @@ function AddEditModal({ user, profiles, onClose, onSave, loading, error }: {
   );
 }
 
-function UserConnectionsModal({ user, allConnections, sessions, onClose, onRefresh, loading }: {
+function UserConnectionsModal({ user, allConnections, sessions, dnsMap, onClose, onRefresh, loading }: {
   user: DisplayUser;
   allConnections: ConnectionEntry[];
   sessions: HotspotActiveUser[];
+  dnsMap: Map<string, string>;
   onClose: () => void;
   onRefresh: () => void;
   loading: boolean;
@@ -965,10 +998,18 @@ function UserConnectionsModal({ user, allConnections, sessions, onClose, onRefre
           </div>
         </div>
         <div className="overflow-y-auto flex-1">
-          {userConns.length === 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-12 text-sm text-[#9CA3AF]">
+              <svg className="w-5 h-5 animate-spin text-purple-500" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="rgba(139,92,246,0.2)" strokeWidth="3"/>
+                <path d="M12 2a10 10 0 0110 10" stroke="#7C3AED" strokeWidth="3" strokeLinecap="round"/>
+              </svg>
+              Fetching live connections from router...
+            </div>
+          ) : userConns.length === 0 ? (
             <div className="py-12 text-center text-sm text-[#9CA3AF]">
-              <p className="font-semibold text-gray-500 mb-1">No connections found</p>
-              <p className="text-xs">Load connections first from the IP Connections tab, then open this view.</p>
+              <p className="font-semibold text-gray-500 mb-1">No connections found for this user</p>
+              <p className="text-xs">The user may have no active connections, or connection tracking may be disabled on the router.</p>
             </div>
           ) : (
             <table className="w-full text-xs text-left">
@@ -989,9 +1030,21 @@ function UserConnectionsModal({ user, allConnections, sessions, onClose, onRefre
                   const dstPort = c.dstAddress.split(":")[1];
                   const isHTTPS = dstPort === "443";
                   const isHTTP = dstPort === "80";
+                  const hostname = c.dstHost || dnsMap.get(dstIp);
                   return (
                     <tr key={c.id} className="hover:bg-purple-50/30 transition-colors">
-                      <td className="py-2.5 px-4 font-mono text-[#1F2937] font-semibold">{dstIp}</td>
+                      <td className="py-2.5 px-4">
+                        {hostname ? (
+                          <div>
+                            <div className="text-[#1F2937] font-semibold text-[12px] max-w-[200px] truncate" title={hostname}>
+                              {hostname}
+                            </div>
+                            <div className="text-[10px] text-gray-400 font-mono">{dstIp}</div>
+                          </div>
+                        ) : (
+                          <span className="font-mono text-[#1F2937] font-semibold text-[12px]">{dstIp}</span>
+                        )}
+                      </td>
                       <td className="py-2.5 px-4">
                         <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${isHTTPS ? "bg-emerald-50 text-emerald-700" : isHTTP ? "bg-amber-50 text-amber-700" : "bg-gray-100 text-gray-500"}`}>
                           :{dstPort}{portLabel[dstPort] ? ` ${portLabel[dstPort]}` : ""}

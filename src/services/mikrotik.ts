@@ -302,8 +302,9 @@ export async function fetchActiveSessions(): Promise<HotspotActiveUser[]> {
       address: String(u.address || ""),
       macAddress: String(u["mac-address"] || ""),
       uptime: String(u.uptime || ""),
-      bytesIn: formatBytes(Number(u["bytes-in"] || 0)),
-      bytesOut: formatBytes(Number(u["bytes-out"] || 0)),
+      // Store raw byte counts so the UI can format them
+      bytesIn: String(Number(u["bytes-in"] ?? u["rx-bytes"] ?? 0)),
+      bytesOut: String(Number(u["bytes-out"] ?? u["tx-bytes"] ?? 0)),
       loginBy: String(u["login-by"] || ""),
     }));
   } catch (err) {
@@ -319,12 +320,14 @@ export async function fetchHotspotUsers(): Promise<HotspotUser[]> {
     return raw.map((u) => ({
       id: String(u[".id"] || u.id || ""),
       name: String(u.name || ""),
+      password: u.password ? String(u.password) : undefined,
       profile: String(u.profile || "default"),
       comment: String(u.comment || ""),
       limitUptime: String(u["limit-uptime"] || ""),
       disabled: Boolean(u.disabled === true || u.disabled === "true"),
-      bytesIn: formatBytes(Number(u["bytes-in"] || 0)),
-      bytesOut: formatBytes(Number(u["bytes-out"] || 0)),
+      // Store raw byte counts so the UI can format them
+      bytesIn: String(Number(u["bytes-in"] ?? u["uptime-bytes-in"] ?? 0)),
+      bytesOut: String(Number(u["bytes-out"] ?? u["uptime-bytes-out"] ?? 0)),
     }));
   } catch (err) {
     console.warn("Failed to fetch hotspot users:", err);
@@ -423,6 +426,28 @@ export async function fetchConnectionTracking(): Promise<ConnectionEntry[]> {
     console.warn("Failed to fetch connection tracking:", err);
     return [];
   }
+}
+
+
+/** Fetch the router DNS cache and return a Map of IP → hostname.
+ *  This lets us resolve destination IPs in connection tracking to real domain names. */
+export async function fetchDnsCache(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  try {
+    const raw = await requestRouter<Array<Record<string, unknown>>>("/ip/dns/cache");
+    if (!Array.isArray(raw)) return map;
+    raw.forEach((entry) => {
+      const name = String(entry.name || entry.address || "");
+      const address = String(entry.address || entry.data || "");
+      if (name && address && address.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
+        // address is an IP → map it to the hostname
+        if (!map.has(address)) map.set(address, name);
+      }
+    });
+  } catch (err) {
+    console.warn("Failed to fetch DNS cache:", err);
+  }
+  return map;
 }
 
 export async function fetchRouterLogs(): Promise<RouterLogEntry[]> {
